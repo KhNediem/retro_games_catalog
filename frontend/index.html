@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retro Gaming Catalog</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>Retro Gaming Catalog</h1>
+    </header>
+    
+    <div class="nav-links">
+        <a href="index.html" class="nav-link">Game Catalog</a>
+        <a href="processing.html" class="nav-link">Processing Tasks</a>
+    </div>
+    
+    <div class="controls">
+        <div class="search-container">
+            <input type="text" id="search" placeholder="Search games..." onkeyup="filterGames()">
+        </div>
+        <div class="filter-container">
+            <select id="platform-filter" onchange="filterGames()">
+                <option value="">All Platforms</option>
+                <!-- Platforms will be loaded dynamically -->
+            </select>
+            <select id="genre-filter" onchange="filterGames()">
+                <option value="">All Genres</option>
+                <!-- Genres will be loaded dynamically -->
+            </select>
+            <select id="year-filter" onchange="filterGames()">
+                <option value="">All Years</option>
+                <option value="1980s">1980s</option>
+                <option value="1990s">1990s</option>
+                <option value="2000s">2000s</option>
+            </select>
+        </div>
+    </div>
+    
+    <div class="catalog" id="game-catalog">
+        <!-- Game cards will be generated here -->
+        <div class="loading">Loading games...</div>
+    </div>
+    
+    <!-- View Game Modal -->
+    <div id="game-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Game Title</h2>
+                <span class="close" onclick="closeModal('game-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="modal-image">
+                    <img id="modal-image" src="/placeholder.svg?height=300&width=300" alt="Game Cover">
+                </div>
+                <div class="modal-details">
+                    <p><strong>Platform:</strong> <span id="modal-platform"></span></p>
+                    <p><strong>Year:</strong> <span id="modal-year"></span></p>
+                    <p><strong>Genre:</strong> <span id="modal-genre"></span></p>
+                    <p><strong>Developer:</strong> <span id="modal-developer"></span></p>
+                    <p><strong>Description:</strong></p>
+                    <p id="modal-description"></p>
+                    
+                    <div id="modal-enriched-data" style="margin-top: 20px; border-top: 1px solid #33ff66; padding-top: 15px;">
+                        <h3>Enriched Metadata</h3>
+                        <div id="enriched-data-content">
+                            <p>Loading enriched data...</p>
+                        </div>
+                    </div>
+                    
+                    <button class="btn" onclick="openEditModal()">Edit Game</button>
+                    <button class="btn delete-btn" onclick="confirmDelete()">Delete Game</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Game Modal -->
+    <div id="add-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Add New Game</h2>
+                <span class="close" onclick="closeModal('add-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="add-game-form" onsubmit="return addGame(event)">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="add-title">Title*</label>
+                            <input type="text" id="add-title" required>
+                            <div class="error-message" id="add-title-error">Title is required</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="add-developer">Developer*</label>
+                            <input type="text" id="add-developer" required>
+                            <div class="error-message" id="add-developer-error">Developer is required</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="add-platform">Platform*</label>
+                            <select id="add-platform" required>
+                                <option value="">Select Platform</option>
+                                <!-- Platforms will be loaded dynamically -->
+                            </select>
+                            <div class="error-message" id="add-platform-error">Platform is required</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="add-genre">Genre*</label>
+                            <select id="add-genre" required>
+                                <option value="">Select Genre</option>
+                                <!-- Genres will be loaded dynamically -->
+                            </select>
+                            <div class="error-message" id="add-genre-error">Genre is required</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="add-year">Year*</label>
+                            <input type="number" id="add-year" min="1970" max="2010" required>
+                            <div class="error-message" id="add-year-error">Valid year is required (1970-2010)</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="add-image">Image URL (optional)</label>
+                            <input type="text" id="add-image" placeholder="Leave blank for default image">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="add-description">Description*</label>
+                        <textarea id="add-description" required></textarea>
+                        <div class="error-message" id="add-description-error">Description is required</div>
+                    </div>
+                    <div id="add-form-error" class="form-error"></div>
+                    <button type="submit" class="btn">Add Game</button>
+                    <p class="processing-note">Note: After adding a game, image processing and metadata enrichment will happen in the background.</p>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Edit Game Modal -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Game</h2>
+                <span class="close" onclick="closeModal('edit-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="edit-game-form" onsubmit="return updateGame(event)">
+                    <input type="hidden" id="edit-id">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit-title">Title*</label>
+                            <input type="text" id="edit-title" required>
+                            <div class="error-message" id="edit-title-error">Title is required</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-developer">Developer*</label>
+                            <input type="text" id="edit-developer" required>
+                            <div class="error-message" id="edit-developer-error">Developer is required</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit-platform">Platform*</label>
+                            <select id="edit-platform" required>
+                                <option value="">Select Platform</option>
+                                <!-- Platforms will be loaded dynamically -->
+                            </select>
+                            <div class="error-message" id="edit-platform-error">Platform is required</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-genre">Genre*</label>
+                            <select id="edit-genre" required>
+                                <option value="">Select Genre</option>
+                                <!-- Genres will be loaded dynamically -->
+                            </select>
+                            <div class="error-message" id="edit-genre-error">Genre is required</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="edit-year">Year*</label>
+                            <input type="number" id="edit-year" min="1970" max="2010" required>
+                            <div class="error-message" id="edit-year-error">Valid year is required (1970-2010)</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-image">Image URL (optional)</label>
+                            <input type="text" id="edit-image" placeholder="Leave blank for default image">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-description">Description*</label>
+                        <textarea id="edit-description" required></textarea>
+                        <div class="error-message" id="edit-description-error">Description is required</div>
+                    </div>
+                    <div id="edit-form-error" class="form-error"></div>
+                    <button type="submit" class="btn">Update Game</button>
+                    <p class="processing-note">Note: If you change the image URL, image processing will happen in the background.</p>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Confirm Delete</h2>
+                <span class="close" onclick="closeModal('delete-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete "<span id="delete-game-title"></span>"?</p>
+                <p>This action cannot be undone.</p>
+                <div class="button-group">
+                    <button class="btn cancel-btn" onclick="closeModal('delete-modal')">Cancel</button>
+                    <button class="btn delete-btn" onclick="deleteGame()">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Game Button -->
+    <div class="add-btn" onclick="openAddModal()">+</div>
+    
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+    
+    <script src="script.js"></script>
+</body>
+</html>

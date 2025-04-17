@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Processing Tasks - Retro Gaming Catalog</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .task-list {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .task-card {
+            background-color: #1a1a1a;
+            border: 2px solid #33ff66;
+            padding: 15px;
+            display: grid;
+            grid-template-columns: auto 1fr auto auto;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .task-id {
+            font-weight: bold;
+            font-size: 1.2rem;
+            color: #33ff66;
+        }
+        
+        .task-title {
+            font-size: 1.1rem;
+        }
+        
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            text-align: center;
+            min-width: 100px;
+        }
+        
+        .status-pending {
+            background-color: #ff9900;
+            color: #000;
+        }
+        
+        .status-processing {
+            background-color: #3399ff;
+            color: #000;
+        }
+        
+        .status-completed {
+            background-color: #33ff66;
+            color: #000;
+        }
+        
+        .status-failed {
+            background-color: #ff3366;
+            color: #fff;
+        }
+        
+        .refresh-btn {
+            background-color: #33ff66;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: "Courier New", Courier, monospace;
+            font-weight: bold;
+            transition: background-color 0.3s;
+            margin-top: 20px;
+        }
+        
+        .refresh-btn:hover {
+            background-color: #66ff99;
+        }
+        
+        .no-tasks {
+            text-align: center;
+            padding: 30px;
+            font-size: 1.2rem;
+            color: #33ff66;
+            grid-column: 1 / -1;
+        }
+        
+        .nav-links {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        
+        .nav-link {
+            margin: 0 15px;
+            color: #33ff66;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+        
+        .auto-refresh {
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+        }
+        
+        .auto-refresh input {
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Retro Gaming Catalog</h1>
+    </header>
+    
+    <div class="nav-links">
+        <a href="index.html" class="nav-link">Game Catalog</a>
+        <a href="processing.html" class="nav-link">Processing Tasks</a>
+    </div>
+    
+    <div class="container">
+        <h2>Background Processing Tasks</h2>
+        <p>This page shows the status of background tasks being processed by our RabbitMQ workers.</p>
+        
+        <div class="auto-refresh">
+            <input type="checkbox" id="auto-refresh" checked>
+            <label for="auto-refresh">Auto-refresh every 5 seconds</label>
+        </div>
+        
+        <button id="refresh-btn" class="refresh-btn">Refresh Now</button>
+        
+        <div class="task-list" id="task-list">
+            <div class="loading">Loading tasks...</div>
+        </div>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+    
+    <script>
+        // API URL
+        const API_URL = "http://localhost:3000/api";
+        
+        // Auto-refresh interval (in milliseconds)
+        const REFRESH_INTERVAL = 5000;
+        let refreshTimer = null;
+        
+        // Initialize the page
+        document.addEventListener("DOMContentLoaded", () => {
+            // Load tasks
+            loadTasks();
+            
+            // Set up refresh button
+            document.getElementById("refresh-btn").addEventListener("click", loadTasks);
+            
+            // Set up auto-refresh
+            const autoRefreshCheckbox = document.getElementById("auto-refresh");
+            autoRefreshCheckbox.addEventListener("change", toggleAutoRefresh);
+            
+            // Start auto-refresh if checked
+            if (autoRefreshCheckbox.checked) {
+                startAutoRefresh();
+            }
+        });
+        
+        // Toggle auto-refresh
+        function toggleAutoRefresh() {
+            const autoRefreshCheckbox = document.getElementById("auto-refresh");
+            
+            if (autoRefreshCheckbox.checked) {
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+        }
+        
+        // Start auto-refresh
+        function startAutoRefresh() {
+            stopAutoRefresh(); // Clear any existing timer
+            refreshTimer = setInterval(loadTasks, REFRESH_INTERVAL);
+        }
+        
+        // Stop auto-refresh
+        function stopAutoRefresh() {
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+                refreshTimer = null;
+            }
+        }
+        
+        // Load tasks from API
+        async function loadTasks() {
+            try {
+                const taskList = document.getElementById("task-list");
+                taskList.innerHTML = '<div class="loading">Loading tasks...</div>';
+                
+                // Fetch tasks
+                const response = await fetch(`${API_URL}/processing`);
+                if (!response.ok) throw new Error("Failed to load tasks");
+                
+                const tasks = await response.json();
+                
+                // Display tasks
+                if (tasks.length === 0) {
+                    taskList.innerHTML = '<div class="no-tasks">No tasks are currently being processed.</div>';
+                    return;
+                }
+                
+                taskList.innerHTML = '';
+                
+                tasks.forEach(task => {
+                    const taskCard = document.createElement("div");
+                    taskCard.className = "task-card";
+                    
+                    // Create task ID element
+                    const taskId = document.createElement("div");
+                    taskId.className = "task-id";
+                    taskId.textContent = `#${task.id}`;
+                    
+                    // Create task title element
+                    const taskTitle = document.createElement("div");
+                    taskTitle.className = "task-title";
+                    taskTitle.textContent = task.title;
+                    
+                    // Create image processing status badge
+                    const imageStatus = document.createElement("div");
+                    imageStatus.className = `status-badge status-${task.processing_status}`;
+                    imageStatus.textContent = `Image: ${capitalizeFirstLetter(task.processing_status)}`;
+                    
+                    // Create metadata status badge
+                    const metadataStatus = document.createElement("div");
+                    metadataStatus.className = `status-badge status-${task.metadata_status}`;
+                    metadataStatus.textContent = `Metadata: ${capitalizeFirstLetter(task.metadata_status)}`;
+                    
+                    // Add elements to task card
+                    taskCard.appendChild(taskId);
+                    taskCard.appendChild(taskTitle);
+                    taskCard.appendChild(imageStatus);
+                    taskCard.appendChild(metadataStatus);
+                    
+                    // Add task card to list
+                    taskList.appendChild(taskCard);
+                });
+                
+            } catch (error) {
+                console.error("Error loading tasks:", error);
+                document.getElementById("task-list").innerHTML = 
+                    '<div class="no-tasks">Failed to load tasks. Please try again later.</div>';
+                showToast("Failed to load tasks. Please try again later.", true);
+            }
+        }
+        
+        // Helper function to capitalize first letter
+        function capitalizeFirstLetter(string) {
+            return string.charAt(0).toUpperCase() + string.slice(1);
+        }
+        
+        // Show toast notification
+        function showToast(message, isError = false) {
+            const toast = document.getElementById("toast");
+            toast.textContent = message;
+            toast.className = isError ? "toast error" : "toast";
+            toast.classList.add("show");
+            
+            setTimeout(() => {
+                toast.classList.remove("show");
+            }, 3000);
+        }
+        
+        // Clean up on page unload
+        window.addEventListener("beforeunload", () => {
+            stopAutoRefresh();
+        });
+    </script>
+</body>
+</html>
