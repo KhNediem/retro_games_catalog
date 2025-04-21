@@ -139,15 +139,12 @@ function generateGameCards(games) {
     const platform = platforms.find((p) => p.id == game.platformId)?.name || "Unknown"
     const genre = genres.find((g) => g.id == game.genreId)?.name || "Unknown"
 
-    // Use thumbnail if available, otherwise use default image
-    const imageUrl =
-      game.thumbnailUrl ||
-      game.imageUrl ||
-      `/placeholder.svg?height=150&width=250&text=${encodeURIComponent(game.title)}`
+    // Use default image if none provided
+    const imageUrl = game.imageUrl || `/placeholder.svg?height=150&width=250&text=${encodeURIComponent(game.title)}`
 
     // Add processing indicator if game is being processed
     let processingIndicator = ""
-    if (game.processingStatus === "pending" || game.metadataStatus === "pending") {
+    if (game.processingStatus === "pending") {
       processingIndicator = '<div class="processing-indicator">Processing...</div>'
     }
 
@@ -209,40 +206,8 @@ async function openGameModal(gameId) {
     document.getElementById("modal-developer").textContent = game.developer
     document.getElementById("modal-description").textContent = game.description
 
-    // Handle enriched metadata
-    const enrichedDataContent = document.getElementById("enriched-data-content")
-
-    if (game.metadataStatus === "completed" && (game.averageRating || game.totalReviews || game.tags)) {
-      let enrichedHTML = ""
-
-      if (game.averageRating) {
-        enrichedHTML += `<p><strong>Average Rating:</strong> ${game.averageRating}/5.0 (${game.totalReviews} reviews)</p>`
-      }
-
-      if (game.difficultyLevel) {
-        enrichedHTML += `<p><strong>Difficulty Level:</strong> ${game.difficultyLevel}</p>`
-      }
-
-      if (game.estimatedPlayTime) {
-        enrichedHTML += `<p><strong>Estimated Play Time:</strong> ${game.estimatedPlayTime}</p>`
-      }
-
-      if (game.tags && game.tags.length > 0) {
-        enrichedHTML += `<p><strong>Tags:</strong> ${game.tags.join(", ")}</p>`
-      }
-
-      if (game.funFact) {
-        enrichedHTML += `<p><strong>Fun Fact:</strong> ${game.funFact}</p>`
-      }
-
-      enrichedDataContent.innerHTML = enrichedHTML
-      document.getElementById("modal-enriched-data").style.display = "block"
-    } else if (game.metadataStatus === "pending") {
-      enrichedDataContent.innerHTML = "<p>Metadata enrichment in progress...</p>"
-      document.getElementById("modal-enriched-data").style.display = "block"
-    } else {
-      document.getElementById("modal-enriched-data").style.display = "none"
-    }
+    // Hide enriched data section
+    document.getElementById("modal-enriched-data").style.display = "none"
 
     // Show modal
     document.getElementById("game-modal").style.display = "block"
@@ -342,7 +307,7 @@ async function deleteGame() {
     await loadGames()
 
     // Show success message
-    showToast("Game deleted successfully")
+    showToast("Game deleted successfully. A message has been sent to RabbitMQ for processing.")
   } catch (error) {
     console.error("Error deleting game:", error)
     closeModal("delete-modal")
@@ -442,7 +407,10 @@ async function addGame(event) {
     await loadGames()
 
     // Show success message
-    showToast("Game added successfully. Background processing has started.")
+    showToast("Game added successfully. A message has been sent to RabbitMQ for processing.")
+
+    // Optionally navigate to the processing page
+    // window.location.href = "processing.html";
   } catch (error) {
     console.error("Error adding game:", error)
     document.getElementById("add-form-error").textContent = `Error: ${error.message}`
@@ -550,7 +518,7 @@ async function updateGame(event) {
     // Show success message
     let message = "Game updated successfully"
     if (updatedGame.processingStatus === "pending") {
-      message += ". Image processing has started."
+      message += ". A message has been sent to RabbitMQ for processing."
     }
     showToast(message)
   } catch (error) {

@@ -1,28 +1,37 @@
-# Retro Gaming Catalog with RabbitMQ
+# Retro Gaming Catalog with RabbitMQ Message Queue
 
-This project is a three-tier application enhanced with RabbitMQ for asynchronous message processing. It consists of:
+This project demonstrates a message-oriented architecture using Docker, RabbitMQ, and a producer/consumer pattern. It consists of:
 
 1. Frontend (HTML, CSS, JavaScript)
 2. Backend (Node.js with Express)
 3. Database (MySQL)
 4. RabbitMQ for message queuing
-5. Python services for background processing
+5. Message Producer service
+6. Message Consumer service
 
 ## Architecture
 
 The application follows a Producer/Consumer pattern:
 
-- The Node.js backend acts as a producer, sending messages to RabbitMQ queues when games are added or updated
-- Python services act as consumers, processing these messages in the background
+- The Node.js backend acts as a producer, sending messages to RabbitMQ queues when games are added, updated, or deleted
+- The message consumer service processes these messages in the background
 - The frontend displays the processing status and results
 
 ## Features
 
 - View, add, edit, and delete retro games
 - Filter games by platform, genre, and year
-- Background processing of game images (resizing, optimization)
-- Background enrichment of game metadata
+- Asynchronous message processing via RabbitMQ
 - Monitoring of processing tasks
+
+## Services
+
+- **Frontend**: Nginx serving static HTML/CSS/JS files
+- **Backend**: Node.js Express API for game operations
+- **Database**: MySQL database for storing game data
+- **RabbitMQ**: Message broker for asynchronous communication
+- **Message Producer**: Service for sending messages to RabbitMQ
+- **Message Consumer**: Service for processing messages from RabbitMQ
 
 ## Setup and Run Instructions
 
@@ -36,6 +45,7 @@ The application follows a Producer/Consumer pattern:
 Create a `.env` file in the root directory with the following variables:
 
 \`\`\`
+DB_HOST=database
 DB_USER=retro_user
 DB_PASSWORD=retro_password
 DB_NAME=retro_games_catalog
@@ -56,6 +66,7 @@ docker-compose up -d
 4. Access the application:
    - Frontend: http://localhost
    - RabbitMQ Management UI: http://localhost:15672 (username: guest, password: guest)
+   - Message Producer UI: http://localhost:3001
 
 ### Stopping the Application
 
@@ -65,102 +76,41 @@ docker-compose down
 
 ## Message Flow
 
-1. When a game is added or updated:
-   - The backend sends a message to the `image_processing` queue with the game ID and image URL
-   - The backend sends a message to the `metadata_enrichment` queue with the game ID and basic info
+1. When a game is added, updated, or deleted:
+   - The backend sends a message to the `game_events` queue with the game ID, action, and data
 
-2. The Python services consume these messages:
-   - The image processor downloads, resizes, and optimizes the image
-   - The metadata enricher generates additional information about the game
+2. The message consumer service:
+   - Receives the message from the queue
+   - Processes it based on the action type
+   - Updates the game's processing status in the database
 
-3. After processing, the services update the game record in the database
-
-4. The frontend displays the processing status and results
-
-## Resilience Features
-
-- Message persistence: Messages are stored on disk and survive broker restarts
-- Acknowledgment: Messages are only removed from the queue after successful processing
-- Error handling: Failed messages are requeued for retry
-- Connection recovery: Services automatically reconnect to RabbitMQ if the connection is lost
-
-## Monitoring
-
-The application includes a dedicated page for monitoring background processing tasks:
-- http://localhost/processing.html
-
-This page shows all tasks currently being processed and their status.
+3. The frontend displays the processing status on the Processing Tasks page
 
 ## Troubleshooting
 
-### Common Issues
+If messages are not flowing through RabbitMQ:
 
-#### Port Conflicts
+1. Check RabbitMQ is running: `docker-compose ps rabbitmq`
+2. Verify connections in RabbitMQ Management UI: http://localhost:15672
+3. Check logs: `docker-compose logs rabbitmq`
+4. Check consumer logs: `docker-compose logs message-consumer`
+5. Check producer logs: `docker-compose logs message-producer`
+6. Restart services: `docker-compose restart rabbitmq message-consumer message-producer backend`
 
-If you see an error like "Ports are not available", it means another application is using one of the ports:
+## Cleaning Up
 
-\`\`\`
-Error response from daemon: Ports are not available: exposing port TCP 0.0.0.0:3306 -> 0.0.0.0:0: listen tcp 0.0.0.0:3306: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
-\`\`\`
-
-**Solution**: Edit the `docker-compose.yml` file to change the port mapping. For example, change `3306:3306` to `3307:3306`.
-
-#### Connection Issues
-
-If services can't connect to each other, check the logs:
+To completely reset the application:
 
 \`\`\`bash
-docker logs gameLab-backend-1
-docker logs gameLab-database-1
-docker logs gameLab-rabbitmq-1
+# Stop all containers
+docker-compose down
+
+# Remove volumes
+docker-compose down -v
+
+# Rebuild and start
+docker-compose up -d --build
 \`\`\`
 
-**Solution**: The updated docker-compose.yml includes health checks and proper dependency management to ensure services start in the correct order.
-
-#### Database Not Initialized
-
-If the database tables aren't created:
-
-**Solution**: Check the database logs and ensure the initialization script is running:
-
-\`\`\`bash
-docker logs gameLab-database-1
+This will remove all persistent data and start fresh.
 \`\`\`
-
-You can also connect to the database directly:
-
-\`\`\`bash
-docker exec -it gameLab-database-1 mysql -u root -p
-\`\`\`
-
-When prompted, enter the password from your DB_PASSWORD environment variable.
-
-#### Rebuilding from Scratch
-
-If you need to start fresh:
-
-\`\`\`bash
-docker-compose down -v  # This removes volumes too
-docker-compose build --no-cache
-docker-compose up -d
-\`\`\`
-
-### Checking Service Health
-
-You can check the health of the backend service:
-
-\`\`\`bash
-curl http://localhost:3000/health
-\`\`\`
-
-This will return a JSON response indicating if the service is healthy and its connections to dependencies.
-
-### Viewing RabbitMQ Queues
-
-Access the RabbitMQ Management UI at http://localhost:15672 (username: guest, password: guest) to view:
-
-- Queue status
-- Message rates
-- Consumer connections
-
-This is useful for debugging message processing issues.

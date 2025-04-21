@@ -9,108 +9,90 @@ dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 3000
-const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://guest:guest@localhost:5672"
+const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://guest:guest@rabbitmq:5672"
 
 // Middleware
 app.use(cors())
 app.use(express.json())
 
-// Database connection with retry
-let pool = null
+// Database connection
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || "database",
+  user: process.env.DB_USER || "retro_user",
+  password: process.env.DB_PASSWORD || "retro_password",
+  database: process.env.DB_NAME || "retro_games_catalog",
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+})
 
-async function connectToDatabase(retries = 5, delay = 5000) {
-  let lastError = null
-
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      console.log(`Attempting database connection (attempt ${attempt}/${retries})...`)
-
-      pool = mysql.createPool({
-        host: process.env.DB_HOST || "localhost",
-        user: process.env.DB_USER || "root",
-        password: process.env.DB_PASSWORD || "Nediem123",
-        database: process.env.DB_NAME || "retro_games_catalog",
-        waitForConnections: true,
-        connectionLimit: 10,
-        queueLimit: 0,
-      })
-
-      // Test the connection
-      const connection = await pool.getConnection()
-      console.log("Database connection successful!")
-      connection.release()
-      return pool
-    } catch (error) {
-      lastError = error
-      console.error(`Database connection failed (attempt ${attempt}/${retries}):`, error)
-
-      if (attempt < retries) {
-        console.log(`Retrying in ${delay / 1000} seconds...`)
-        await new Promise((resolve) => setTimeout(resolve, delay))
-      }
-    }
+// Test database connection
+async function testConnection() {
+  try {
+    const connection = await pool.getConnection()
+    console.log("Database connection successful")
+    connection.release()
+  } catch (error) {
+    console.error("Database connection failed:", error)
+    setTimeout(testConnection, 5000) // Retry after 5 seconds
   }
-
-  console.error(`Failed to connect to database after ${retries} attempts`)
-  throw lastError
 }
 
-// RabbitMQ connection with retry
+testConnection()
+
+// RabbitMQ connection
 let rabbitConnection = null
 let rabbitChannel = null
 
-async function connectToRabbitMQ(retries = 5, delay = 5000) {
-  let lastError = null
+async function connectToRabbitMQ() {
+  try {
+    console.log(`Connecting to RabbitMQ at ${RABBITMQ_URL}...`)
+    rabbitConnection = await amqp.connect(RABBITMQ_URL)
+    rabbitChannel = await rabbitConnection.createChannel()
 
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      console.log(`Attempting RabbitMQ connection (attempt ${attempt}/${retries})...`)
+    // Declare queue with durability
+    await rabbitChannel.assertQueue("game_events", { durable: true })
 
-      rabbitConnection = await amqp.connect(RABBITMQ_URL)
-      rabbitChannel = await rabbitConnection.createChannel()
+    console.log("RabbitMQ connection successful")
 
-      // Declare queues with durability
-      await rabbitChannel.assertQueue("image_processing", { durable: true })
-      await rabbitChannel.assertQueue("metadata_enrichment", { durable: true })
+    // Set up connection error handling
+    rabbitConnection.on("error", (err) => {
+      console.error("RabbitMQ connection error:", err)
+      rabbitChannel = null
+      rabbitConnection = null
+      setTimeout(connectToRabbitMQ, 5000)
+    })
 
-      console.log("RabbitMQ connection successful")
-
-      // Set up connection error handling
-      rabbitConnection.on("error", (err) => {
-        console.error("RabbitMQ connection error:", err)
-        setTimeout(() => connectToRabbitMQ(), 5000)
-      })
-
-      rabbitConnection.on("close", () => {
-        console.log("RabbitMQ connection closed, attempting to reconnect...")
-        setTimeout(() => connectToRabbitMQ(), 5000)
-      })
-
-      return { connection: rabbitConnection, channel: rabbitChannel }
-    } catch (error) {
-      lastError = error
-      console.error(`RabbitMQ connection failed (attempt ${attempt}/${retries}):`, error)
-
-      if (attempt < retries) {
-        console.log(`Retrying in ${delay / 1000} seconds...`)
-        await new Promise((resolve) => setTimeout(resolve, delay))
-      }
-    }
+    rabbitConnection.on("close", () => {
+      console.log("RabbitMQ connection closed, attempting to reconnect...")
+      rabbitChannel = null
+      rabbitConnection = null
+      setTimeout(connectToRabbitMQ, 5000)
+    })
+  } catch (error) {
+    console.error("RabbitMQ connection failed:", error)
+    rabbitChannel = null
+    rabbitConnection = null
+    setTimeout(connectToRabbitMQ, 5000)
   }
-
-  console.error(`Failed to connect to RabbitMQ after ${retries} attempts`)
-  // Don't throw error, continue without RabbitMQ
-  console.log("Continuing without RabbitMQ...")
-  return { connection: null, channel: null }
 }
+
+// Connect to RabbitMQ with retry
+connectToRabbitMQ()
 
 // Function to send message to RabbitMQ
 async function sendToQueue(queue, message) {
   try {
     if (!rabbitChannel) {
-      console.error("RabbitMQ channel not available")
-      return false
+      console.error("RabbitMQ channel not available, reconnecting...")
+      await connectToRabbitMQ()
+      if (!rabbitChannel) {
+        console.error("Failed to reconnect to RabbitMQ")
+        return false
+      }
     }
+
+    console.log(`Attempting to send message to queue ${queue}:`, message)
 
     const success = rabbitChannel.sendToQueue(
       queue,
@@ -119,7 +101,7 @@ async function sendToQueue(queue, message) {
     )
 
     if (success) {
-      console.log(`Message sent to queue ${queue}:`, message)
+      console.log(`Message sent to queue ${queue} successfully`)
       return true
     } else {
       console.error(`Failed to send message to queue ${queue}`)
@@ -127,31 +109,10 @@ async function sendToQueue(queue, message) {
     }
   } catch (error) {
     console.error(`Error sending message to queue ${queue}:`, error)
+    rabbitChannel = null
+    rabbitConnection = null
+    setTimeout(connectToRabbitMQ, 5000)
     return false
-  }
-}
-
-// Serve processed images
-app.use("/processed", express.static("/app/processed"))
-
-// Initialize connections and start server
-async function initializeApp() {
-  try {
-    // Connect to database with retries
-    await connectToDatabase()
-
-    // Connect to RabbitMQ with retries
-    const rabbit = await connectToRabbitMQ()
-    rabbitConnection = rabbit.connection
-    rabbitChannel = rabbit.channel
-
-    // Start server only after connections are established
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`)
-    })
-  } catch (error) {
-    console.error("Failed to initialize application:", error)
-    process.exit(1)
   }
 }
 
@@ -160,10 +121,6 @@ async function initializeApp() {
 // Get all platforms
 app.get("/api/platforms", async (req, res) => {
   try {
-    if (!pool) {
-      return res.status(503).json({ message: "Database connection not available" })
-    }
-
     const [rows] = await pool.query("SELECT * FROM platforms ORDER BY name")
     res.json(rows)
   } catch (error) {
@@ -175,10 +132,6 @@ app.get("/api/platforms", async (req, res) => {
 // Get all genres
 app.get("/api/genres", async (req, res) => {
   try {
-    if (!pool) {
-      return res.status(503).json({ message: "Database connection not available" })
-    }
-
     const [rows] = await pool.query("SELECT * FROM genres ORDER BY name")
     res.json(rows)
   } catch (error) {
@@ -190,17 +143,10 @@ app.get("/api/genres", async (req, res) => {
 // Get all games with optional filters
 app.get("/api/games", async (req, res) => {
   try {
-    if (!pool) {
-      return res.status(503).json({ message: "Database connection not available" })
-    }
-
     const { search, platformId, genreId, yearCategory } = req.query
 
     let query = `
-            SELECT g.*, p.name as platform_name, gr.name as genre_name,
-                   g.thumbnail_url, g.processing_status, g.metadata_status,
-                   g.average_rating, g.total_reviews, g.difficulty_level,
-                   g.estimated_play_time, g.tags, g.fun_fact
+            SELECT g.*, p.name as platform_name, gr.name as genre_name
             FROM games g
             JOIN platforms p ON g.platform_id = p.id
             JOIN genres gr ON g.genre_id = gr.id
@@ -246,15 +192,7 @@ app.get("/api/games", async (req, res) => {
       yearCategory: game.year_category,
       description: game.description,
       imageUrl: game.image_url,
-      thumbnailUrl: game.thumbnail_url,
       processingStatus: game.processing_status,
-      metadataStatus: game.metadata_status,
-      averageRating: game.average_rating,
-      totalReviews: game.total_reviews,
-      difficultyLevel: game.difficulty_level,
-      estimatedPlayTime: game.estimated_play_time,
-      tags: game.tags ? JSON.parse(game.tags) : [],
-      funFact: game.fun_fact,
     }))
 
     res.json(games)
@@ -267,15 +205,8 @@ app.get("/api/games", async (req, res) => {
 // Get a single game by ID
 app.get("/api/games/:id", async (req, res) => {
   try {
-    if (!pool) {
-      return res.status(503).json({ message: "Database connection not available" })
-    }
-
     const [rows] = await pool.query(
-      `SELECT g.*, p.name as platform_name, gr.name as genre_name,
-              g.thumbnail_url, g.processing_status, g.metadata_status,
-              g.average_rating, g.total_reviews, g.difficulty_level,
-              g.estimated_play_time, g.tags, g.fun_fact
+      `SELECT g.*, p.name as platform_name, gr.name as genre_name
              FROM games g
              JOIN platforms p ON g.platform_id = p.id
              JOIN genres gr ON g.genre_id = gr.id
@@ -301,15 +232,7 @@ app.get("/api/games/:id", async (req, res) => {
       yearCategory: game.year_category,
       description: game.description,
       imageUrl: game.image_url,
-      thumbnailUrl: game.thumbnail_url,
       processingStatus: game.processing_status,
-      metadataStatus: game.metadata_status,
-      averageRating: game.average_rating,
-      totalReviews: game.total_reviews,
-      difficultyLevel: game.difficulty_level,
-      estimatedPlayTime: game.estimated_play_time,
-      tags: game.tags ? JSON.parse(game.tags) : [],
-      funFact: game.fun_fact,
     })
   } catch (error) {
     console.error("Error fetching game:", error)
@@ -320,10 +243,6 @@ app.get("/api/games/:id", async (req, res) => {
 // Create a new game
 app.post("/api/games", async (req, res) => {
   try {
-    if (!pool) {
-      return res.status(503).json({ message: "Database connection not available" })
-    }
-
     const { title, platformId, genreId, developer, releaseYear, yearCategory, description, imageUrl } = req.body
 
     // Validate required fields
@@ -346,40 +265,41 @@ app.post("/api/games", async (req, res) => {
     const [result] = await pool.query(
       `INSERT INTO games 
              (title, platform_id, genre_id, developer, release_year, year_category, description, image_url, 
-              processing_status, metadata_status) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        title,
-        platformId,
-        genreId,
-        developer,
-        releaseYear,
-        yearCategory,
-        description,
-        imageUrl || null,
-        "pending",
-        "pending",
-      ],
+              processing_status) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [title, platformId, genreId, developer, releaseYear, yearCategory, description, imageUrl || null, "pending"],
     )
 
     const newGameId = result.insertId
 
-    // Send messages to RabbitMQ for background processing
-    if (newGameId && rabbitChannel) {
-      // Send image processing message
-      sendToQueue("image_processing", {
+    // Send message to RabbitMQ for background processing
+    if (newGameId) {
+      // Send game event message
+      const messageData = {
         gameId: newGameId,
-        imageUrl: imageUrl || null,
-      })
+        action: "create",
+        gameData: {
+          title,
+          platformId,
+          genreId,
+          developer,
+          releaseYear,
+          yearCategory,
+          description,
+          imageUrl,
+        },
+        timestamp: new Date().toISOString(),
+      }
 
-      // Send metadata enrichment message
-      sendToQueue("metadata_enrichment", {
-        gameId: newGameId,
-        title: title,
-        developer: developer,
-      })
-    } else {
-      console.log("Skipping RabbitMQ message sending - channel not available")
+      console.log("Preparing to send message to RabbitMQ:", messageData)
+
+      const messageSent = await sendToQueue("game_events", messageData)
+
+      if (messageSent) {
+        console.log(`Successfully sent 'create' message to RabbitMQ for game ID: ${newGameId}`)
+      } else {
+        console.error(`Failed to send 'create' message to RabbitMQ for game ID: ${newGameId}`)
+      }
     }
 
     res.status(201).json({
@@ -393,7 +313,6 @@ app.post("/api/games", async (req, res) => {
       description,
       imageUrl,
       processingStatus: "pending",
-      metadataStatus: "pending",
     })
   } catch (error) {
     console.error("Error creating game:", error)
@@ -404,10 +323,6 @@ app.post("/api/games", async (req, res) => {
 // Update a game
 app.put("/api/games/:id", async (req, res) => {
   try {
-    if (!pool) {
-      return res.status(503).json({ message: "Database connection not available" })
-    }
-
     const { title, platformId, genreId, developer, releaseYear, yearCategory, description, imageUrl } = req.body
 
     // Validate required fields
@@ -416,12 +331,10 @@ app.put("/api/games/:id", async (req, res) => {
     }
 
     // Check if game exists
-    const [gameRows] = await pool.query("SELECT id, image_url FROM games WHERE id = ?", [req.params.id])
+    const [gameRows] = await pool.query("SELECT id FROM games WHERE id = ?", [req.params.id])
     if (gameRows.length === 0) {
       return res.status(404).json({ message: "Game not found" })
     }
-
-    const oldImageUrl = gameRows[0].image_url
 
     // Validate platform and genre exist
     const [platformRows] = await pool.query("SELECT id FROM platforms WHERE id = ?", [platformId])
@@ -439,9 +352,16 @@ app.put("/api/games/:id", async (req, res) => {
       `UPDATE games 
              SET title = ?, platform_id = ?, genre_id = ?, developer = ?, 
                  release_year = ?, year_category = ?, description = ?, image_url = ?,
-                 processing_status = CASE WHEN ? != ? THEN 'pending' ELSE processing_status END
+                 processing_status = 'pending'
              WHERE id = ?`,
-      [
+      [title, platformId, genreId, developer, releaseYear, yearCategory, description, imageUrl || null, req.params.id],
+    )
+
+    // Send message to RabbitMQ for background processing
+    const messageData = {
+      gameId: Number.parseInt(req.params.id),
+      action: "update",
+      gameData: {
         title,
         platformId,
         genreId,
@@ -449,19 +369,19 @@ app.put("/api/games/:id", async (req, res) => {
         releaseYear,
         yearCategory,
         description,
-        imageUrl || null,
         imageUrl,
-        oldImageUrl,
-        req.params.id,
-      ],
-    )
+      },
+      timestamp: new Date().toISOString(),
+    }
 
-    // If image URL changed, send message to process the new image
-    if (imageUrl !== oldImageUrl && rabbitChannel) {
-      sendToQueue("image_processing", {
-        gameId: Number.parseInt(req.params.id),
-        imageUrl: imageUrl || null,
-      })
+    console.log("Preparing to send update message to RabbitMQ:", messageData)
+
+    const messageSent = await sendToQueue("game_events", messageData)
+
+    if (messageSent) {
+      console.log(`Successfully sent 'update' message to RabbitMQ for game ID: ${req.params.id}`)
+    } else {
+      console.error(`Failed to send 'update' message to RabbitMQ for game ID: ${req.params.id}`)
     }
 
     res.json({
@@ -474,7 +394,7 @@ app.put("/api/games/:id", async (req, res) => {
       yearCategory,
       description,
       imageUrl,
-      processingStatus: imageUrl !== oldImageUrl ? "pending" : "completed",
+      processingStatus: "pending",
     })
   } catch (error) {
     console.error("Error updating game:", error)
@@ -482,89 +402,36 @@ app.put("/api/games/:id", async (req, res) => {
   }
 })
 
-// Update game images (called by image processor)
-app.put("/api/games/:id/images", async (req, res) => {
+// Update game processing status (called by message consumer)
+app.put("/api/games/:id/process-complete", async (req, res) => {
   try {
-    if (!pool) {
-      return res.status(503).json({ message: "Database connection not available" })
-    }
+    const { status } = req.body
 
-    const { imageUrl, thumbnailUrl } = req.body
-
-    // Update game with processed image URLs
+    // Update game with processing status
     await pool.query(
       `UPDATE games 
-             SET image_url = ?, 
-                 thumbnail_url = ?,
-                 processing_status = 'completed'
+             SET processing_status = ?
              WHERE id = ?`,
-      [imageUrl, thumbnailUrl, req.params.id],
+      [status, req.params.id],
     )
 
     res.json({
-      message: "Game images updated successfully",
-      id: Number.parseInt(req.params.id),
-      imageUrl,
-      thumbnailUrl,
-    })
-  } catch (error) {
-    console.error("Error updating game images:", error)
-    res.status(500).json({ message: "Failed to update game images" })
-  }
-})
-
-// Update game metadata (called by metadata enricher)
-app.put("/api/games/:id/metadata", async (req, res) => {
-  try {
-    if (!pool) {
-      return res.status(503).json({ message: "Database connection not available" })
-    }
-
-    const { averageRating, totalReviews, difficultyLevel, estimatedPlayTime, tags, funFact } = req.body
-
-    // Update game with enriched metadata
-    await pool.query(
-      `UPDATE games 
-             SET average_rating = ?, 
-                 total_reviews = ?,
-                 difficulty_level = ?,
-                 estimated_play_time = ?,
-                 tags = ?,
-                 fun_fact = ?,
-                 metadata_status = 'completed'
-             WHERE id = ?`,
-      [
-        averageRating || null,
-        totalReviews || null,
-        difficultyLevel || null,
-        estimatedPlayTime || null,
-        tags ? JSON.stringify(tags) : null,
-        funFact || null,
-        req.params.id,
-      ],
-    )
-
-    res.json({
-      message: "Game metadata updated successfully",
+      message: "Game processing status updated successfully",
       id: Number.parseInt(req.params.id),
     })
   } catch (error) {
-    console.error("Error updating game metadata:", error)
-    res.status(500).json({ message: "Failed to update game metadata" })
+    console.error("Error updating game processing status:", error)
+    res.status(500).json({ message: "Failed to update game processing status" })
   }
 })
 
 // Get processing status
 app.get("/api/processing", async (req, res) => {
   try {
-    if (!pool) {
-      return res.status(503).json({ message: "Database connection not available" })
-    }
-
     const [rows] = await pool.query(
-      `SELECT id, title, processing_status, metadata_status
+      `SELECT id, title, processing_status
        FROM games
-       WHERE processing_status = 'pending' OR metadata_status = 'pending'
+       WHERE processing_status = 'pending'
        ORDER BY id DESC`,
     )
 
@@ -578,10 +445,6 @@ app.get("/api/processing", async (req, res) => {
 // Delete a game
 app.delete("/api/games/:id", async (req, res) => {
   try {
-    if (!pool) {
-      return res.status(503).json({ message: "Database connection not available" })
-    }
-
     // Check if game exists
     const [gameRows] = await pool.query("SELECT id FROM games WHERE id = ?", [req.params.id])
     if (gameRows.length === 0) {
@@ -590,6 +453,23 @@ app.delete("/api/games/:id", async (req, res) => {
 
     // Delete game
     await pool.query("DELETE FROM games WHERE id = ?", [req.params.id])
+
+    // Send message to RabbitMQ for the delete event
+    const messageData = {
+      gameId: Number.parseInt(req.params.id),
+      action: "delete",
+      timestamp: new Date().toISOString(),
+    }
+
+    console.log("Preparing to send delete message to RabbitMQ:", messageData)
+
+    const messageSent = await sendToQueue("game_events", messageData)
+
+    if (messageSent) {
+      console.log(`Successfully sent 'delete' message to RabbitMQ for game ID: ${req.params.id}`)
+    } else {
+      console.error(`Failed to send 'delete' message to RabbitMQ for game ID: ${req.params.id}`)
+    }
 
     res.json({ message: "Game deleted successfully" })
   } catch (error) {
@@ -600,20 +480,20 @@ app.delete("/api/games/:id", async (req, res) => {
 
 // Health check endpoint
 app.get("/health", (req, res) => {
-  const healthy = pool !== null && (rabbitChannel !== null || process.env.NODE_ENV === "development")
-  if (healthy) {
-    res.status(200).json({ status: "healthy" })
-  } else {
-    res.status(503).json({
-      status: "unhealthy",
-      database: pool !== null ? "connected" : "disconnected",
-      rabbitmq: rabbitChannel !== null ? "connected" : "disconnected",
-    })
-  }
+  const rabbitMQStatus = rabbitChannel ? "connected" : "disconnected"
+
+  res.json({
+    status: "ok",
+    database: "connected",
+    rabbitmq: rabbitMQStatus,
+    timestamp: new Date().toISOString(),
+  })
 })
 
-// Initialize the application
-initializeApp()
+// Start server
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`)
+})
 
 // Graceful shutdown
 process.on("SIGINT", async () => {

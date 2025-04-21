@@ -62,10 +62,10 @@
                     <p><strong>Description:</strong></p>
                     <p id="modal-description"></p>
                     
-                    <div id="modal-enriched-data" style="margin-top: 20px; border-top: 1px solid #33ff66; padding-top: 15px;">
-                        <h3>Enriched Metadata</h3>
+                    <div id="modal-enriched-data" style="display: none;">
+                        <h3>Processing Status</h3>
                         <div id="enriched-data-content">
-                            <p>Loading enriched data...</p>
+                            <p>Processing in progress...</p>
                         </div>
                     </div>
                     
@@ -133,7 +133,8 @@
                     </div>
                     <div id="add-form-error" class="form-error"></div>
                     <button type="submit" class="btn">Add Game</button>
-                    <p class="processing-note">Note: After adding a game, image processing and metadata enrichment will happen in the background.</p>
+                    <p class="processing-note">Note: After adding  class="btn">Add Game</button>
+                    <p class="processing-note">Note: After adding a game, background processing will happen automatically.</p>
                 </form>
             </div>
         </div>
@@ -197,7 +198,7 @@
                     </div>
                     <div id="edit-form-error" class="form-error"></div>
                     <button type="submit" class="btn">Update Game</button>
-                    <p class="processing-note">Note: If you change the image URL, image processing will happen in the background.</p>
+                    <p class="processing-note">Note: After updating a game, background processing will happen automatically.</p>
                 </form>
             </div>
         </div>

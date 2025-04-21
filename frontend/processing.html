@@ -18,7 +18,7 @@
             border: 2px solid #33ff66;
             padding: 15px;
             display: grid;
-            grid-template-columns: auto 1fr auto auto;
+            grid-template-columns: auto 1fr auto;
             gap: 15px;
             align-items: center;
         }
@@ -127,7 +127,7 @@
     
     <div class="container">
         <h2>Background Processing Tasks</h2>
-        <p>This page shows the status of background tasks being processed by our RabbitMQ workers.</p>
+        <p>This page shows the status of game events being processed by our RabbitMQ message consumer. When you add, update, or delete a game, a message is sent to RabbitMQ and processed asynchronously.</p>
         
         <div class="auto-refresh">
             <input type="checkbox" id="auto-refresh" checked>
@@ -229,21 +229,15 @@
                     taskTitle.className = "task-title";
                     taskTitle.textContent = task.title;
                     
-                    // Create image processing status badge
-                    const imageStatus = document.createElement("div");
-                    imageStatus.className = `status-badge status-${task.processing_status}`;
-                    imageStatus.textContent = `Image: ${capitalizeFirstLetter(task.processing_status)}`;
-                    
-                    // Create metadata status badge
-                    const metadataStatus = document.createElement("div");
-                    metadataStatus.className = `status-badge status-${task.metadata_status}`;
-                    metadataStatus.textContent = `Metadata: ${capitalizeFirstLetter(task.metadata_status)}`;
+                    // Create processing status badge
+                    const statusBadge = document.createElement("div");
+                    statusBadge.className = `status-badge status-${task.processing_status}`;
+                    statusBadge.textContent = `Status: ${capitalizeFirstLetter(task.processing_status)}`;
                     
                     // Add elements to task card
                     taskCard.appendChild(taskId);
                     taskCard.appendChild(taskTitle);
-                    taskCard.appendChild(imageStatus);
-                    taskCard.appendChild(metadataStatus);
+                    taskCard.appendChild(statusBadge);
                     
                     // Add task card to list
                     taskList.appendChild(taskCard);

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Message Producer - Retro Gaming Catalog</title>
+    <style>
+        body {
+            font-family: "Courier New", Courier, monospace;
+            background-color: #121212;
+            color: #33ff66;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            text-shadow: 0 0 10px #33ff66;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #1a1a1a;
+            padding: 20px;
+            border: 2px solid #33ff66;
+            box-shadow: 0 0 15px rgba(51, 255, 102, 0.5);
+        }
+        
+        .form-section {
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #33ff66;
+        }
+        
+        h2 {
+            margin-top: 0;
+            color: #33ff66;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            background-color: #000;
+            border: 2px solid #33ff66;
+            color: #33ff66;
+            font-family: "Courier New", Courier, monospace;
+        }
+        
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        
+        button {
+            background-color: #33ff66;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: "Courier New", Courier, monospace;
+            font-weight: bold;
+            margin-top: 10px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #66ff99;
+        }
+        
+        .response {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #000;
+            border: 1px solid #33ff66;
+            white-space: pre-wrap;
+            display: none;
+        }
+        
+        .error {
+            color: #ff3366;
+            margin-top: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Message Producer</h1>
+    
+    <div class="container">
+        <div class="form-section">
+            <h2>Send Game Event Message</h2>
+            <form id="game-event-form">
+                <label for="game-id">Game ID:</label>
+                <input type="number" id="game-id" required min="1">
+                
+                <label for="action">Action:</label>
+                <select id="action" required>
+                    <option value="create">Create</option>
+                    <option value="update">Update</option>
+                    <option value="delete">Delete</option>
+                    <option value="process">Process</option>
+                </select>
+                
+                <label for="game-data">Game Data (JSON):</label>
+                <textarea id="game-data" placeholder='{"title": "Super Mario Bros.", "developer": "Nintendo"}'></textarea>
+                
+                <button type="submit">Send Game Event Message</button>
+            </form>
+            <div id="game-event-error" class="error"></div>
+            <div id="game-event-response" class="response"></div>
+        </div>
+        
+        <div class="form-section">
+            <h2>Send Custom Message</h2>
+            <form id="custom-message-form">
+                <label for="custom-message">Message:</label>
+                <textarea id="custom-message" required placeholder="Enter your custom message here"></textarea>
+                
+                <button type="submit">Send Custom Message</button>
+            </form>
+            <div id="custom-message-error" class="error"></div>
+            <div id="custom-message-response" class="response"></div>
+        </div>
+    </div>
+    
+    <script>
+        // API URL
+        const API_URL = "/api";
+        
+        // Game Event Form
+        document.getElementById("game-event-form").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            
+            const gameId = document.getElementById("game-id").value;
+            const action = document.getElementById("action").value;
+            let gameData = document.getElementById("game-data").value;
+            
+            // Parse game data if provided
+            try {
+                gameData = gameData ? JSON.parse(gameData) : {};
+            } catch (error) {
+                document.getElementById("game-event-error").textContent = "Invalid JSON in Game Data";
+                document.getElementById("game-event-error").style.display = "block";
+                return;
+            }
+            
+            // Hide previous error and response
+            document.getElementById("game-event-error").style.display = "none";
+            document.getElementById("game-event-response").style.display = "none";
+            
+            try {
+                const response = await fetch(`${API_URL}/messages/game-event`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        gameId: parseInt(gameId),
+                        action,
+                        gameData
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.message || "Failed to send message");
+                }
+                
+                // Show response
+                document.getElementById("game-event-response").textContent = JSON.stringify(data, null, 2);
+                document.getElementById("game-event-response").style.display = "block";
+                
+            } catch (error) {
+                document.getElementById("game-event-error").textContent = error.message;
+                document.getElementById("game-event-error").style.display = "block";
+            }
+        });
+        
+        // Custom Message Form
+        document.getElementById("custom-message-form").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            
+            const message = document.getElementById("custom-message").value;
+            
+            // Hide previous error and response
+            document.getElementById("custom-message-error").style.display = "none";
+            document.getElementById("custom-message-response").style.display = "none";
+            
+            try {
+                const response = await fetch(`${API_URL}/messages/custom`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        message
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.message || "Failed to send message");
+                }
+                
+                // Show response
+                document.getElementById("custom-message-response").textContent = JSON.stringify(data, null, 2);
+                document.getElementById("custom-message-response").style.display = "block";
+                
+            } catch (error) {
+                document.getElementById("custom-message-error").textContent = error.message;
+                document.getElementById("custom-message-error").style.display = "block";
+            }
+        });
+    </script>
+</body>
+</html>
